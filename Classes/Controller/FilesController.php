@@ -344,7 +344,7 @@ class FilesController
      * Extract additional custom metadata fields from pixx.io file based on extension configuration
      * 
      * @param object $pixxioFile The pixx.io file object
-     * @return array Associative array of custom metadata fields
+      * @return array<string, mixed> Associative array of custom metadata fields
      */
     private function getAdditionalCustomMetadata($pixxioFile): array
     {
