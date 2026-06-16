@@ -16,17 +16,18 @@ use TYPO3\CMS\Core\Utility\GeneralUtility;
 
 final class FileControlsEventListener
 {
-    private $applicationId = 'ghx8F66X3ix4AJ0VmS0DE8sx7';
+    private string $applicationId = 'ghx8F66X3ix4AJ0VmS0DE8sx7';
 
     public function __construct(
         protected IconFactory $iconFactory
     ) {}
 
     #[AsEventListener]
-    public function __invoke(CustomFileControlsEvent $event)
+    public function __invoke(CustomFileControlsEvent $event): void
     {
         if ($this->shouldAddButton($event)) {
             $this->addButton($event);
+            $this->addAssets($event);
         }
     }
 
@@ -52,11 +53,9 @@ final class FileControlsEventListener
         return ($showUpload || $showByUrl) && $pixxioUploadAllowed;
     }
 
-    protected function addButton(CustomFileControlsEvent $event)
+    protected function addButton(CustomFileControlsEvent $event): void
     {
-        $resultArray = $event->getResultArray();
-
-        $extensionConfiguration = ConfigurationUtility::getExtensionConfiguration();
+        $extensionConfiguration = ConfigurationUtility::getConfigurationForDatabaseRow($event->getDatabaseRow());
         $languageService = $this->getLanguageService();
         $buttonText = htmlspecialchars($languageService->sL('LLL:EXT:pixxio_extension/Resources/Private/Language/locallang_be.xlf:modal_view.button'));
         $foreignTable = $event->getFieldConfig()['foreign_table'];
@@ -67,9 +66,8 @@ final class FileControlsEventListener
             'title' => $buttonText,
             'style' => 'margin-left:5px',
             'data-dom' => htmlspecialchars($objectPrefix),
+            'data-pid' => (string)($event->getDatabaseRow()['pid'] ?? 0),
             'data-key' => $this->applicationId,
-            'data-url' => $extensionConfiguration['url'],
-            'data-token' => $extensionConfiguration['token_refresh'],
             'data-uid' => uniqid(),
         ];
 
@@ -95,6 +93,10 @@ final class FileControlsEventListener
 
         $iframeLanguage = $languageService->getLocale();
         $iframeUrl = 'https://plugin.pixx.io/static/v2/' . $iframeLanguage . '/media?multiSelect=true&applicationId=' . $this->applicationId;
+
+        if (isset($extensionConfiguration['use_cdn_links']) && filter_var($extensionConfiguration['use_cdn_links'], FILTER_VALIDATE_BOOLEAN)) {
+            $iframeUrl .= '&useDirectLinks=true';
+        }
 
         // Load additional metadata to be independent from the sync job
         $metadataFields = [
@@ -134,7 +136,7 @@ final class FileControlsEventListener
         // Add allowedDownloadFormats parameter if configured
         if (isset($extensionConfiguration['allowed_download_formats']) && !empty($extensionConfiguration['allowed_download_formats'])) {
             $allowedFormats = $extensionConfiguration['allowed_download_formats'];
-            
+
             // Handle comma-separated values
             if (strpos($allowedFormats, ',') !== false) {
                 $formats = array_map('trim', explode(',', $allowedFormats));
@@ -152,8 +154,12 @@ final class FileControlsEventListener
         $event->addControl(
             '<div class="pixxio-lightbox"><div class="pixxio-close"></div><div class="pixxio-lightbox-inner"><iframe class="pixxio_sdk" data-src="' . $iframeUrl . '" width="100%" height="100%"></iframe></div></div>'
         );
+    }
 
-        $resultArray['javaScriptModules'][] = JavaScriptModuleInstruction::create('@pixxio/pixxio-extension/ScriptSDK.js');
+    protected function addAssets(CustomFileControlsEvent $event): void
+    {
+        $resultArray = $event->getResultArray();
+        $resultArray['javaScriptModules']['pixxio_extension'] = JavaScriptModuleInstruction::create('@pixxio/pixxio-extension/ScriptSDK.js');
         $resultArray['stylesheetFiles']['pixxio_extension'] = 'EXT:pixxio_extension/Resources/Public/StyleSheet/StyleSDK.css';
         $event->setResultArray($resultArray);
     }
