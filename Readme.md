@@ -11,6 +11,7 @@ The pixx.io Typo3 Extension allows pixx.io users to select the assets directly f
 - Sync your assets and metadata from pixx.io Mediaspace
 - Multi-Site Support: Configure separate credentials and file storages per TYPO3 site
 - Full TYPO3 FAL Support: Works with any FAL storage adapter (local filesystem, AWS S3, Azure, Google Cloud, etc.)
+- Optional CDN Links: deliver assets directly from the pixx.io CDN instead of from your TYPO3 file storage
 - Includes Proxy support
 - Works with the popular core extension: filemetadata (Composer package: typo3/cms-filemetadata)
 
@@ -98,6 +99,71 @@ Simply configure your desired storage in TYPO3's File > Filelist module and refe
 
 In the `allowed_download_formats` setting you can configure in which format the images are allowed to be imported. With the `original` format, the original file will be imported without conversion. With the `preview` format, images are downscaled to Full HD size and imported as JPEG or PNG. With the formats `jpg`, `png`, `pdf` and `tiff`, images are converted to the respective format if possible.
 
+#### CDN Links (`use_cdn_links`)
+
+With the `use_cdn_links` flag enabled, assets are no longer delivered from your TYPO3 file storage but directly from the pixx.io CDN. **A pixx.io plan that includes CDN Links is required for this.**
+
+The setting is global only (Extension Configuration > Basic) and cannot be overridden per site.
+
+**What changes when the flag is enabled:**
+
+- The image picker is opened with direct links enabled, so pixx.io creates a CDN link for every selected asset.
+- On import, the CDN URL is stored in the file metadata and only a lightweight local preview image (max. 250px wide, generated via the PHP GD extension) is written to the configured file storage. The local file exists for the backend preview — it is not the file that is delivered in the frontend.
+- Two read-only fields are filled in `sys_file_metadata` and shown in the file metadata form:
+  - `pixxio_is_direct_link` – marks the file as a CDN file
+  - `pixxio_direct_link` – the CDN URL used for delivery
+- The cropping tool is hidden for such files in the file reference, because TYPO3 cannot process the image locally. TYPO3 image processing (scaling, cropping, responsive image variants) does not apply to CDN-delivered images; they are output with the dimensions of the CDN asset.
+
+**Frontend rendering:**
+
+The extension ships Fluid partial overrides that output `<img src="{file.properties.pixxio_direct_link}">` when a CDN link is present and fall back to the regular TYPO3 rendering otherwise:
+
+- `Resources/Private/Partials/fluid_styled_content/Media/Rendering/Image.html` (for `fluid_styled_content`)
+- `Resources/Private/Partials/bootstrap_package/Media/Gallery.html` (for `bootstrap_package`)
+
+These partials are **not** registered automatically. Add the path you need to your TypoScript setup:
+
+```typoscript
+# fluid_styled_content
+lib.contentElement.partialRootPaths.200 = EXT:pixxio_extension/Resources/Private/Partials/fluid_styled_content/
+
+# bootstrap_package
+lib.contentElement.partialRootPaths.201 = EXT:pixxio_extension/Resources/Private/Partials/bootstrap_package/
+```
+
+In your own templates you can use the metadata property directly:
+
+```html
+<f:if condition="{file.properties.pixxio_direct_link}">
+    <f:then>
+        <img src="{file.properties.pixxio_direct_link}" alt="{file.properties.alternative}">
+    </f:then>
+    <f:else>
+        <f:media file="{file}" alt="{file.properties.alternative}" />
+    </f:else>
+</f:if>
+```
+
+**Image transformations via query parameters:**
+
+CDN links support transformation parameters that can be appended to the URL. This is the replacement for TYPO3's local image processing, which is not available for CDN files:
+
+| Parameter | Values                                       | Description                        |
+| --------- | -------------------------------------------- | ---------------------------------- |
+| `format`  | `auto`, `jpeg`, `webp`, `avif`, `png`, `gif` | Output format, `auto` negotiates the best format for the client |
+| `quality` | `0` – `100`                                  | Compression quality                |
+| `width`   | integer > 0                                  | Target width in pixels             |
+| `height`  | integer > 0                                  | Target height in pixels            |
+
+```html
+<img src="{file.properties.pixxio_direct_link}?format=auto&quality=80&width=1200"
+     alt="{file.properties.alternative}">
+```
+
+The parameters are only evaluated for the source formats JPEG, PNG, GIF, WebP and AVIF. For all other file types (e.g. PDF, TIFF, video) the asset is always delivered unchanged. They also require a CDN link — plain direct links without CDN always deliver the file as it is stored in pixx.io.
+
+**Interaction with the sync:** Deleting files and syncing metadata work as usual. The `update` option (new main version) should stay disabled while CDN links are used: the sync replaces the local preview file, but the stored CDN URL is not refreshed, so the frontend would keep delivering the previous version.
+
 ### Metadata
 
 It's possible to sync the alt text. Therefore you have to define the name of the metadata, which you would like to synchronize.
@@ -112,7 +178,7 @@ In Sync you can define behaviors that should be done during a running sync. **No
 If a file is deleted in pixx.io, it will also be deleted in TYPO3 when this flag is set. If this flag is disabled, files that no longer exist in pixx.io will be kept in TYPO3 (a warning will be logged).
 
 **Update:**
-If you use the version feature of pixx.io, you can automatically update files to their new main version. When this flag is set, the sync will replace files that aren't the main version with their new main version.
+If you use the version feature of pixx.io, you can automatically update files to their new main version. When this flag is set, the sync will replace files that aren't the main version with their new main version. This option is only meant to be used with CDN Links disabled (see [CDN Links](#cdn-links-use_cdn_links)).
 
 **Update Metadata:**
 When this flag is set, the sync will update metadata (title, description, alt text, keywords, etc.) from pixx.io to TYPO3 for all synchronized files. This allows you to keep metadata in sync without updating file versions.
